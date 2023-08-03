@@ -1,0 +1,137 @@
+import os
+import time
+from pathlib import Path
+from googleapiclient import discovery
+from oauth2client.client import GoogleCredentials
+from google.oauth2 import service_account
+from googleapiclient.errors import HttpError
+
+# Uncomment to use Application Default Credentials (ADC)
+credentials = GoogleCredentials.get_application_default()
+
+# Uncomment to use Service Account Credentials in Json format
+# credentials = service_account.Credentials.from_service_account_file('.json')
+
+api = 'monitoring.googleapis.com'
+
+service = discovery.build('cloudresourcemanager', 'v1', credentials=credentials)
+service_v2 = discovery.build('cloudresourcemanager', 'v2', credentials=credentials)
+service_usage_service = discovery.build('serviceusage', 'v1', credentials=credentials)
+
+request = service.projects().list()
+
+PROJECTS_FILE = 'active_projects.txt'
+
+# This function is here to read project IDs from the file
+def read_project_ids_from_file(file_path):
+    with open(file_path, 'r') as file:
+        project_ids = [line.strip() for line in file.readlines()]
+    return project_ids
+
+# Get the organization information from the folder id.
+def get_organization_from_folder(folder_id):
+    folder = service_v2.folders().get(name=f'folders/{folder_id}').execute()
+    parent = folder.get('parent')
+    if parent.startswith('organizations/'):
+        org_id = parent.split('/')[-1]
+        org = service.organizations().get(name=f'organizations/{org_id}').execute()
+        return org.get('displayName', 'N/A'), org_id
+    elif parent.startswith('folders/'):
+        return get_organization_from_folder(parent.split('/')[-1])
+    else:
+        return 'N/A', 'N/A'
+
+
+# Save the project ID to a file under the organization's folder.
+def save_project_to_org_file(project_id, org_name):
+    org_folder = org_name.replace(' ', '_')
+    org_path = Path(org_folder)
+    org_path.mkdir(parents=True, exist_ok=True)
+    file_path = org_path / f"{org_folder}_projects.list"
+    with file_path.open('a') as f:
+        f.write(f"{project_id}\n")
+
+
+# Check if the specified API is enabled for the given project ID.
+def check_api_enabled(project_id, api):
+    request = service_usage_service.services().list(parent=f'projects/{project_id}', filter=f'state:ENABLED')
+
+    while request is not None:
+        try:
+            response = request.execute()
+            services = response.get('services', [])
+
+            for item in services:
+                name = item['config']['name']
+                if name == api:
+                    return True
+
+            request = service_usage_service.services().list_next(previous_request=request, previous_response=response)
+        except HttpError as error:
+            error_message = str(error)
+            if "not found or permission denied" in error_message:
+                print(f"Project '{project_id}' not found (deleted) or permission denied. Skipping...")
+                return False
+            else:
+                print(f"An error occurred: {error}")
+                exit(1)
+#        time.sleep(1)  # Add a 1-second delay between API calls
+    return False
+
+# Save the project ID to a file named "disabled_api_projects.txt" under the organization's folder if the API is disabled.
+def save_project_with_disabled_api(project_id, org_name):
+    org_folder = org_name.replace(' ', '_')
+    org_path = Path(org_folder)
+    org_path.mkdir(parents=True, exist_ok=True)
+    file_path = org_path / "disabled_api_projects.txt"
+    with file_path.open('a') as f:
+        f.write(f"{project_id}\n")
+
+
+def main():
+    if os.path.isfile(PROJECTS_FILE):
+        project_ids = read_project_ids_from_file(PROJECTS_FILE)
+    else:
+        request = service.projects().list()
+        project_ids = []
+        while request is not None:
+            try:
+                response = request.execute()
+                for project in response.get('projects', []):
+                    project_id = project['projectId']
+                    project_ids.append(project_id)
+                request = service.projects().list_next(previous_request=request, previous_response=response)
+            except HttpError as error:
+                error_message = str(error)
+                if "has been deleted" in error_message:
+                    print("Skipping a deleted project.")
+                else:
+                    print(f"An error occurred: {error}")
+                request = service.projects().list_next(previous_request=request, previous_response={})
+
+    for project_id in project_ids:
+        project = service.projects().get(projectId=project_id).execute()
+        parent = project.get('parent', {})
+        parent_type = parent.get('type')
+        parent_id = parent.get('id', 'N/A')
+        org_name = 'N/A'
+        org_id = 'N/A'
+
+        if parent_type == 'organization':
+            org = service.organizations().get(name=f'organizations/{parent_id}').execute()
+            org_name = org.get('displayName', 'N/A')
+            org_id = parent_id
+        elif parent_type == 'folder':
+            org_name, org_id = get_organization_from_folder(parent_id)
+        else:
+            org_name = 'others'
+
+        save_project_to_org_file(project_id, org_name)
+        print(f'{project_id:<20} {org_name:<20} {org_id}')
+
+        if not check_api_enabled(project_id, api):
+            save_project_with_disabled_api(project_id, org_name)
+            print(f"{project_id} has {api} DISABLED")
+
+if __name__ == '__main__':
+    main()
