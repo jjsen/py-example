@@ -1,45 +1,33 @@
 import requests
+import json
+import base64
 
-# Define the endpoint and credentials
-auth = ('username', 'api_token')
+# Define your credentials and URLs
+source_jira_url = ""
+username = ""
+api_token = ""
 
-def get_ticket_count(project_key):
-    url = f"https://software-dev.atlassian.net/rest/api/3/search"
+# Setup headers for requests
+auth_str = f"{username}:{api_token}"
+auth_encoded = base64.b64encode(auth_str.encode()).decode()
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Basic {auth_encoded}"
+}
+
+def get_ticket_count():
+    url = f"{source_jira_url}/rest/api/3/search"
     params = {
-        'jql': f'project = {project_key}',
+        "jql": "",  # Adjust the JQL query as needed
+        "maxResults": 0,  # Set to 0 to only retrieve metadata
     }
-    response = requests.get(url, auth=auth, params=params)
+    response = requests.get(url, headers=headers, params=params)
     if response.status_code != 200:
-        print(f'Failed to retrieve data for project {project_key}: {response.text}')
-        return 0
-    try:
-        data = response.json()
-    except json.JSONDecodeError:
-        print(f'Failed to decode JSON for project {project_key}: {response.text}')
-        return 0
-    return data['total']
+        print(f'Failed to retrieve data: {response.text}')
+        return
 
-def list_projects():
-    url = "https://software-dev.atlassian.net/rest/api/3/project"
-    response = requests.get(url, auth=auth)
-    if response.status_code != 200:
-        print(f'Failed to retrieve projects: {response.text}')
-        return []
-    try:
-        return response.json()
-    except json.JSONDecodeError:
-        print(f'Failed to decode JSON: {response.text}')
-        return []
+    total_tickets = response.json()['total']
+    print(f'Total number of tickets: {total_tickets}')
 
-def main():
-    projects = list_projects()
-    total_tickets = 0
-    for project in projects:
-        project_key = project['key']
-        ticket_count = get_ticket_count(project_key)
-        print(f'Project {project_key} has {ticket_count} tickets.')
-        total_tickets += ticket_count
-    print(f'Total number of tickets across all projects: {total_tickets}')
-
-if __name__ == "__main__":
-    main()
+# Execute the function to get the ticket count
+get_ticket_count()
