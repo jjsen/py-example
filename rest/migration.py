@@ -66,7 +66,6 @@ fetch_project_keys()
 
 
 
-
 auth_str = f"{username}:{api_token}"
 auth_encoded = base64.b64encode(auth_str.encode()).decode()
 headers = {
@@ -75,19 +74,30 @@ headers = {
 }
 
 def fetch_issue_keys(jira_url):
-    url = f"{jira_url}/rest/api/3/search"
-    params = {
-        "jql": "",  # Adjust the JQL query as needed
-        "maxResults": 50,  # Adjust as needed
-        "fields": "key"  # Only fetch the 'key' field
-    }
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code != 200:
-        print(f'Failed to retrieve issue keys from {jira_url}: {response.text}')
-        return None
+    start_at = 0
+    max_results = 100  # Set to a reasonable value to balance performance with the number of requests
+    issue_keys = []
 
-    issues_data = response.json()["issues"]
-    issue_keys = [issue["key"] for issue in issues_data]
+    while True:
+        url = f"{jira_url}/rest/api/3/search"
+        params = {
+            "jql": "",  # Adjust the JQL query as needed
+            "startAt": start_at,
+            "maxResults": max_results,
+            "fields": "key"  # Only fetch the 'key' field
+        }
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != 200:
+            print(f'Failed to retrieve issue keys from {jira_url}: {response.text}')
+            return None
+
+        issues_data = response.json()["issues"]
+        if not issues_data:
+            break  # Exit the loop if there are no more issues to fetch
+
+        issue_keys.extend(issue["key"] for issue in issues_data)
+        start_at += max_results  # Update the startAt parameter for the next request
+
     return issue_keys
 
 def compare_issue_keys():
@@ -99,8 +109,13 @@ def compare_issue_keys():
 
     missing_keys = set(source_issue_keys) - set(target_issue_keys)
 
-    print(f'Issue keys in source but not in target: {missing_keys}')
-    print(f'Count of issue keys in source but not in target: {len(missing_keys)}')
+    # Write the results to text files
+    with open('missing_keys.txt', 'w') as file:
+        for key in missing_keys:
+            file.write(f'{key}\n')
+
+    with open('summary.txt', 'w') as file:
+        file.write(f'Count of issue keys in source but not in target: {len(missing_keys)}\n')
 
 # Execute the function to compare issue keys
 compare_issue_keys()
