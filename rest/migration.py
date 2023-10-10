@@ -1,5 +1,4 @@
 import requests
-import json
 
 # Define the endpoint and credentials
 auth = ('username', 'api_token')
@@ -13,7 +12,11 @@ def get_ticket_count(project_key):
     if response.status_code != 200:
         print(f'Failed to retrieve data for project {project_key}: {response.text}')
         return 0
-    data = response.json()
+    try:
+        data = response.json()
+    except json.JSONDecodeError:
+        print(f'Failed to decode JSON for project {project_key}: {response.text}')
+        return 0
     return data['total']
 
 def list_projects():
@@ -22,7 +25,11 @@ def list_projects():
     if response.status_code != 200:
         print(f'Failed to retrieve projects: {response.text}')
         return []
-    return response.json()
+    try:
+        return response.json()
+    except json.JSONDecodeError:
+        print(f'Failed to decode JSON: {response.text}')
+        return []
 
 def main():
     projects = list_projects()
