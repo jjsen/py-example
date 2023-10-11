@@ -1,53 +1,53 @@
-import requests
 import json
-import base64
+import requests
+from concurrent.futures import ThreadPoolExecutor
 
-# Define your credentials and URLs
-source_jira_url = ""
-target_jira_url = ""
-username = ""
-api_token = ""
+# Assume keys are loaded from the text files generated in the previous step
+source_keys = [line.strip() for line in open('source_keys.txt')]
 
-# Setup headers for requests
-auth_str = f"{username}:{api_token}"
-auth_encoded = base64.b64encode(auth_str.encode()).decode()
+# Setup headers for requests (assuming headers variable is already initialized)
 headers = {
-    "Content-Type": "application/json",
-    "Authorization": f"Basic {auth_encoded}"
+    # ... (your headers here)
 }
 
-def fetch_keys(jira_url, filename):
-    start_at = 0
-    max_results = 50  # Maximum allowed by API
-    total_fetched = 0
-    total_available = None  # We'll know the total after the first request
+def get_remote_links(jira_url, key):
+    url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        print(f'Failed to retrieve data from {jira_url} for {key}: {response.text}')
+        return None
+    return response.json()
 
-    with open(filename, 'w') as file:
-        while total_available is None or total_fetched < total_available:
-            params = {
-                "startAt": start_at,
-                "maxResults": max_results,
-                "fields": "key"  # Request only the key field for efficiency
-            }
-            url = f"{jira_url}/rest/api/3/search"
-            response = requests.get(url, headers=headers, params=params)
-            if response.status_code != 200:
-                print(f'Failed to retrieve data from {jira_url}: {response.text}')
-                return
+def compare_links(key):
+    source_links = get_remote_links(source_jira_url, key)
+    target_links = get_remote_links(target_jira_url, key)
+    
+    if source_links is None or target_links is None:
+        return []
 
-            issues_data = response.json()["issues"]
-            for issue in issues_data:
-                file.write(f"{issue['key']}\n")
+    missing_data_batch = []
+    source_urls = {link['object']['url'] for link in source_links}
+    target_urls = {link['object']['url'] for link in target_links}
+    missing_urls = source_urls - target_urls
+    
+    for missing_url in missing_urls:
+        missing_data_batch.append(next(link for link in source_links if link['object']['url'] == missing_url))
 
-            # Update pagination variables
-            if total_available is None:
-                total_available = response.json()["total"]
-            total_fetched += len(issues_data)
-            start_at += max_results
+    return missing_data_batch
 
-# Fetch keys and write to files
-fetch_keys(source_jira_url, 'source_keys.txt')
-fetch_keys(target_jira_url, 'target_keys.txt')
+# URLs
+source_jira_url = "https://software-dev.atlassian.net"
+target_jira_url = "https://software.atlassian.net"
 
-# Execute the function to compare issue keys
-compare_issue_keys()
+batch_size = 1000
+for i in range(0, len(source_keys), batch_size):
+    batch_keys = source_keys[i:i + batch_size]
+    missing_data = []
+    with ThreadPoolExecutor() as executor:
+        results = executor.map(compare_links, batch_keys)
+    for result in results:
+        missing_data.extend(result)
+    # Save missing data to a file for the current batch
+    with open(f'missing_data_batch_{i // batch_size + 1}.json', 'w') as file:
+        json.dump(missing_data, file, indent=4)
+
