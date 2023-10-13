@@ -1,14 +1,26 @@
-import json
 import requests
-from concurrent.futures import ThreadPoolExecutor
+import json
 
-# Assume keys are loaded from the text files generated in the previous step
-source_keys = [line.strip() for line in open('source_keys.txt')]
+# Credentials and URLs
+source_jira_url = "https://source-jira.example.com"
+target_jira_url = "https://target-jira.example.com"
+headers = {"Authorization": "Basic ..."}  # Authentication headers
 
-# Setup headers for requests (assuming headers variable is already initialized)
-headers = {
-    # ... (your headers here)
-}
+def fetch_keys(jira_url, start_at=0):
+    url = f"{jira_url}/rest/api/3/search"
+    params = {
+        "startAt": start_at,
+        "maxResults": 50,
+        "fields": "key"
+    }
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code != 200:
+        print(f'Failed to retrieve data from {jira_url}: {response.text}')
+        return None
+
+    issues_data = response.json()["issues"]
+    keys = [issue['key'] for issue in issues_data]
+    return keys
 
 def get_remote_links(jira_url, key):
     url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
@@ -18,36 +30,47 @@ def get_remote_links(jira_url, key):
         return None
     return response.json()
 
-def compare_links(key):
+def compare_and_migrate_links(key):
     source_links = get_remote_links(source_jira_url, key)
     target_links = get_remote_links(target_jira_url, key)
-    
+
     if source_links is None or target_links is None:
-        return []
+        return
 
-    missing_data_batch = []
-    source_urls = {link['object']['url'] for link in source_links}
-    target_urls = {link['object']['url'] for link in target_links}
-    missing_urls = source_urls - target_urls
-    
-    for missing_url in missing_urls:
-        missing_data_batch.append(next(link for link in source_links if link['object']['url'] == missing_url))
+    source_urls = {link['object']['url']: link for link in source_links}
+    target_urls = {link['object']['url']: link for link in target_links}
 
-    return missing_data_batch
+    for url, link in source_urls.items():
+        if url not in target_urls:
+            migrate_remote_link(target_jira_url, key, link)
 
-# URLs
-source_jira_url = "https://software-dev.atlassian.net"
-target_jira_url = "https://software.atlassian.net"
+def migrate_remote_link(jira_url, key, link):
+    migration_headers = headers.copy()
+    migration_headers.update({"notifyUsers": "false"})
+    url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
+    response = requests.post(url, headers=migration_headers, json=link)
+    if response.status_code != 201:
+        print(f'Failed to migrate link for {key}: {response.text}')
 
-batch_size = 1000
-for i in range(0, len(source_keys), batch_size):
-    batch_keys = source_keys[i:i + batch_size]
-    missing_data = []
-    with ThreadPoolExecutor() as executor:
-        results = executor.map(compare_links, batch_keys)
-    for result in results:
-        missing_data.extend(result)
-    # Save missing data to a file for the current batch
-    with open(f'missing_data_batch_{i // batch_size + 1}.json', 'w') as file:
-        json.dump(missing_data, file, indent=4)
+def main():
+    start_at = 0
+    while True:
+        issue_keys = fetch_keys(source_jira_url, start_at)
+        if not issue_keys:
+            break  # Exit loop when no more issue keys are found
 
+        for issue_key in issue_keys:
+            compare_and_migrate_links(issue_key)
+
+        start_at += len(issue_keys)  # Update start_at for next batch
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+def main():
+    issue_key = "YOUR_ISSUE_KEY_HERE"  # Replace with your specific issue key
+    compare_and_migrate_links(issue_key)
