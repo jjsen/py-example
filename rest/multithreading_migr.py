@@ -44,16 +44,22 @@ def get_remote_links(jira_url, key):
     url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
     try:
         response = requests.get(url, headers=headers)
+        if response.status_code == 404:
+            logging.error(f'Failed to retrieve data from {jira_url} for {key}: 404 Not Found')
+            return None
         response.raise_for_status()
     except requests.RequestException as e:
         logging.error(f'Failed to retrieve data from {jira_url} for {key}: {e}')
-        return []
+        return None
     else:
         return response.json()
 
 def compare_and_migrate_links(key):
     source_links = get_remote_links(source_jira_url, key)
     target_links = get_remote_links(target_jira_url, key)
+
+    if source_links is None or target_links is None:
+        return  # Skip processing for this key due to earlier errors
     
     source_urls = [link['object']['url'] for link in source_links]
     target_urls = [link['object']['url'] for link in target_links]
