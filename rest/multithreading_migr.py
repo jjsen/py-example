@@ -50,6 +50,15 @@ def get_remote_links(jira_url, key):
         return response.json()
 
 def compare_and_migrate_links(key):
+    source_links = get_remote_links(source_jira_url, key)
+    if source_links is None:
+        logging.error(f'Failed to retrieve source links for {key}')
+        return
+
+    target_links = get_remote_links(target_jira_url, key)
+    if target_links is None:
+        logging.error(f'Failed to retrieve target links for {key}')
+        return
     try:
         source_links = get_remote_links(source_jira_url, key)
         target_links = get_remote_links(target_jira_url, key)
