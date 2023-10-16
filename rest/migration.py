@@ -1,5 +1,11 @@
 import requests
+import logging
+from datetime import datetime
 import json
+
+# Configure logging
+timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+logging.basicConfig(filename=f'logfile-{timestamp}.log', level=logging.INFO)
 
 # Credentials and URLs
 source_jira_url = "https://source-jira.example.com"
@@ -13,64 +19,64 @@ def fetch_keys(jira_url, start_at=0):
         "maxResults": 50,
         "fields": "key"
     }
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code != 200:
-        print(f'Failed to retrieve data from {jira_url}: {response.text}')
-        return None
-
-    issues_data = response.json()["issues"]
-    keys = [issue['key'] for issue in issues_data]
-    return keys
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logging.error(f'Failed to retrieve data from {jira_url}: {e}')
+        return []
+    else:
+        issues_data = response.json()["issues"]
+        keys = [issue['key'] for issue in issues_data]
+        return keys
 
 def get_remote_links(jira_url, key):
     url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        print(f'Failed to retrieve data from {jira_url} for {key}: {response.text}')
-        return None
-    return response.json()
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logging.error(f'Failed to retrieve data from {jira_url} for {key}: {e}')
+        return []
+    else:
+        return response.json()
 
 def compare_and_migrate_links(key):
     source_links = get_remote_links(source_jira_url, key)
     target_links = get_remote_links(target_jira_url, key)
+    
+    source_urls = [link['object']['url'] for link in source_links]
+    target_urls = [link['object']['url'] for link in target_links]
 
-    if source_links is None or target_links is None:
-        return
-
-    source_urls = {link['object']['url']: link for link in source_links}
-    target_urls = {link['object']['url']: link for link in target_links}
-
-    for url, link in source_urls.items():
+    for url in source_urls:
         if url not in target_urls:
-            migrate_remote_link(target_jira_url, key, link)
+            link_block = next((link for link in source_links if link['object']['url'] == url), None)
+            if link_block:
+                migrate_remote_link(target_jira_url, key, link_block)
 
 def migrate_remote_link(jira_url, key, link):
     migration_headers = headers.copy()
     migration_headers.update({"notifyUsers": "false"})
     url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
-    response = requests.post(url, headers=migration_headers, json=link)
-    if response.status_code != 201:
-        print(f'Failed to migrate link for {key}: {response.text}')
+    try:
+        response = requests.post(url, headers=migration_headers, json=link)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logging.error(f'Failed to migrate link for {key}: {e}')
+    else:
+        logging.info(f'Successfully migrated link for {key}')
 
 def main():
     start_at = 0
     while True:
         issue_keys = fetch_keys(source_jira_url, start_at)
         if not issue_keys:
-            break  # Exit loop when no more issue keys are found
+            break
 
         for issue_key in issue_keys:
             compare_and_migrate_links(issue_key)
 
-        start_at += len(issue_keys)  # Update start_at for next batch
+        start_at += len(issue_keys)
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-def main():
-    issue_key = "YOUR_ISSUE_KEY_HERE"  # Replace with your specific issue key
-    compare_and_migrate_links(issue_key)
