@@ -13,6 +13,15 @@ source_jira_url = "https://source-jira.example.com"
 target_jira_url = "https://target-jira.example.com"
 headers = {"Authorization": "Basic ..."}  # Authentication headers
 
+def fetch_total_issues(jira_url):
+    url = f"{jira_url}/rest/api/3/search"
+    params = {
+        "maxResults": 1
+    }
+    response = requests.get(url, headers=headers, params=params)
+    total_issues = response.json()['total']
+    return total_issues
+
 def fetch_keys(jira_url, start_at=0):
     url = f"{jira_url}/rest/api/3/search"
     params = {
@@ -61,6 +70,8 @@ def process_issue_keys(issue_keys):
 
 def main():
     logging.basicConfig(filename=f'log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log', level=logging.INFO)
+    total_issues = fetch_total_issues(source_jira_url)
+    processed_issues = 0
     start_at = 0
     with ThreadPoolExecutor() as executor:
         while True:
@@ -69,6 +80,10 @@ def main():
                 break  # Exit loop when no more issue keys are found
             
             executor.submit(process_issue_keys, issue_keys)
+            
+            processed_issues += len(issue_keys)
+            progress_percentage = (processed_issues / total_issues) * 100
+            print(f'Processed {processed_issues}/{total_issues} issues ({progress_percentage:.2f}%)')
             
             start_at += len(issue_keys)  # Update start_at for next batch
 
