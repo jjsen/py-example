@@ -59,7 +59,9 @@ def compare_and_migrate_links(key):
             if url not in target_urls:
                 link_block = next((link for link in source_links if link['object']['url'] == url), None)
                 if link_block:
-                    migrate_remote_link(target_jira_url, key, link_block)
+                    print(f'Would migrate link for {key} from {source_jira_url} to {target_jira_url}')
+                    # uncomment if migr
+                    # migrate_remote_link(target_jira_url, key, link_block)
     except Exception as e:
         logging.error(f'Failed to compare and migrate links for {key}: {e}')
 
