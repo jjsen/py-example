@@ -15,9 +15,7 @@ headers = {"Authorization": "Basic ..."}  # Authentication headers
 
 def fetch_total_issues(jira_url):
     url = f"{jira_url}/rest/api/3/search"
-    params = {
-        "maxResults": 1
-    }
+    params = {"maxResults": 1}
     response = requests.get(url, headers=headers, params=params)
     total_issues = response.json()['total']
     return total_issues
@@ -44,31 +42,39 @@ def get_remote_links(jira_url, key):
     url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
     try:
         response = requests.get(url, headers=headers)
-        if response.status_code == 404:
-            logging.error(f'Failed to retrieve data from {jira_url} for {key}: 404 Not Found')
-            return None
         response.raise_for_status()
     except requests.RequestException as e:
         logging.error(f'Failed to retrieve data from {jira_url} for {key}: {e}')
-        return None
+        return []
     else:
         return response.json()
 
 def compare_and_migrate_links(key):
-    source_links = get_remote_links(source_jira_url, key)
-    target_links = get_remote_links(target_jira_url, key)
+    try:
+        source_links = get_remote_links(source_jira_url, key)
+        target_links = get_remote_links(target_jira_url, key)
+        source_urls = [link['object']['url'] for link in source_links]
+        target_urls = [link['object']['url'] for link in target_links]
+        for url in source_urls:
+            if url not in target_urls:
+                link_block = next((link for link in source_links if link['object']['url'] == url), None)
+                if link_block:
+                    migrate_remote_link(target_jira_url, key, link_block)
+    except Exception as e:
+        logging.error(f'Failed to compare and migrate links for {key}: {e}')
 
-    if source_links is None or target_links is None:
-        return  # Skip processing for this key due to earlier errors
-    
-    source_urls = [link['object']['url'] for link in source_links]
-    target_urls = [link['object']['url'] for link in target_links]
 
-    for url in source_urls:
-        if url not in target_urls:
-            link_block = next((link for link in source_links if link['object']['url'] == url), None)
-            if link_block:
-                print(f'Would migrate link for {key} from {source_jira_url} to {target_jira_url}')
+def migrate_remote_link(jira_url, key, link):
+    migration_headers = headers.copy()
+    migration_headers.update({"notifyUsers": "false"})
+    url = f"{jira_url}/rest/api/3/issue/{key}/remotelink"
+    try:
+        response = requests.post(url, headers=migration_headers, json=link)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logging.error(f'Failed to migrate link for {key}: {e}')
+    else:
+        logging.info(f'Successfully migrated link for {key}')
 
 def process_issue_keys(issue_keys):
     for issue_key in issue_keys:
@@ -84,13 +90,10 @@ def main():
             issue_keys = fetch_keys(source_jira_url, start_at)
             if not issue_keys:
                 break  # Exit loop when no more issue keys are found
-            
             executor.submit(process_issue_keys, issue_keys)
-            
             processed_issues += len(issue_keys)
             progress_percentage = (processed_issues / total_issues) * 100
             print(f'Processed {processed_issues}/{total_issues} issues ({progress_percentage:.2f}%)')
-            
             start_at += len(issue_keys)  # Update start_at for next batch
 
 if __name__ == "__main__":
